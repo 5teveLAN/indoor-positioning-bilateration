@@ -4,24 +4,25 @@ import time
 
 import adafruit_minimqtt.adafruit_minimqtt as MQTT
 import adafruit_ntp
-import socketpool
-import wifi
+# import socketpool
+# import wifi
+import socket
 from adafruit_ble import BLERadio
 from adafruit_ble.advertising import Advertisement
 from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
 
 # Get wifi details and more from a secrets.py file
 try:
-    from secrets import addresses_to_filter, mqtt_env, secrets
+    from my_secrets import addresses_to_filter, mqtt_env, secrets
 except ImportError:
     print("WiFi secrets are kept in secrets.py, please add them there!")
     raise
 
 # Connect to WiFi
-wifi.radio.connect(secrets["ssid"], secrets["password"])
+# wifi.radio.connect(secrets["ssid"], secrets["password"])
 
 # Create a socket pool
-pool = socketpool.SocketPool(wifi.radio)
+pool = socket
 
 # Get time server (Network Time Protocol)
 ntp = adafruit_ntp.NTP(pool, tz_offset=0)
@@ -78,14 +79,14 @@ def get_time():
         day, month, year, hour, mins, secs
     )
 
-
+uuid_filter = "1111"  # Filter for advertisements containing this UUID
 # Start BLE scan for advertisements
 def start_scan():
-    for advertisement in ble.start_scan(ProvideServicesAdvertisement, Advertisement):
-        addr_bytes = advertisement.address.address_bytes
-        addr_str = "".join("{:02x}".format(b) for b in addr_bytes).lower()
-
-        if addr_str in addresses_to_filter:
+    # write a function to scan for BLE advertisements and print the address and RSSI
+    for advertisement in ble.start_scan(ProvideServicesAdvertisement):
+        if isinstance(advertisement, ProvideServicesAdvertisement) and uuid_filter in str(advertisement.services):
+            addr_bytes = advertisement.address.address_bytes
+            addr_str = "".join("{:02x}".format(b) for b in addr_bytes).upper()
             current_time_str = get_time()
             print(addr_str, current_time_str, "RSSI:", advertisement.rssi)
 
@@ -105,9 +106,25 @@ def start_scan():
     print("Scan done.")
 
 
+def scan_ble_advertisements():
+    """
+    Scans for BLE advertisements and prints the address and RSSI of devices with UUID 0x1111.
+    """
+    print("Scanning for BLE advertisements...")
+    for advertisement in ble.start_scan(ProvideServicesAdvertisement):
+        if isinstance(advertisement, ProvideServicesAdvertisement) and "1111" in str(advertisement.services):
+            addr_bytes = advertisement.address.address_bytes
+            addr_str = ":".join("{:02X}".format(b) for b in addr_bytes)
+            print(f"Device Address: {addr_str}, RSSI: {advertisement.rssi}")
+
+    ble.stop_scan()
+    print("BLE scan complete.")
+
+
 while True:
     try:
         start_scan()
+        # scan_ble_advertisements()
     except OSError as e:
         ble.stop_scan()  # stop the scan before we try again
         print("Failed to scan: ", e)
