@@ -13,7 +13,7 @@ from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
 
 # Get wifi details and more from a secrets.py file
 try:
-    from my_secrets import addresses_to_filter, mqtt_env, secrets
+    from my_secrets import addresses_to_filter, mqtt_env, secrets, RECEIVER_NO
 except ImportError:
     print("WiFi secrets are kept in secrets.py, please add them there!")
     raise
@@ -69,7 +69,7 @@ mqtt_client.connect()
 
 # Publish a message
 def publish_message(message: str):
-    mqtt_client.publish(mqtt_env["topic"], message)
+    mqtt_client.publish(mqtt_env["topic"]+"/receivers/"+str(RECEIVER_NO), message)
 
 
 def get_time():

@@ -8,7 +8,7 @@ from collections import deque
 
 import numpy as np
 import paho.mqtt.client as mqtt
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 
 from calc import TrilaterationController
 from controller import Controller
@@ -16,13 +16,17 @@ from environment import *
 from filter import apply_kalman_filter, initialize_kalman_filter
 from graph import animate, set_on_close
 from utils import convert_string_to_datetime
-
+try:
+    from my_secrets import addresses_to_filter, mqtt_env, secrets
+except ImportError:
+    print("WiFi secrets are kept in secrets.py, please add them there!")
+    raise
 RUN_PIXEL_DISPLAY = True  # Whether to run the pixel display
 GRAPH_REFRESH_INTERVAL = 2  # Refresh interval for the graph (seconds)
 DISPLAY_REFRESH_INTERVAL = 4  # Refresh interval for the pixe ldisplay (seconds)
 
 # Load env variables from .env file
-load_dotenv()
+# load_dotenv()
 
 # Logging configuration
 logging.basicConfig(
@@ -34,11 +38,11 @@ logging.basicConfig(
 stop_threads = False
 
 # Environment variables
-host = os.getenv("MQTT_HOST")
-port = int(os.getenv("MQTT_PORT"))
-username = os.getenv("MQTT_USERNAME")
-password = os.getenv("MQTT_PASSWORD")
-topic = os.getenv("MQTT_TOPIC")
+host = mqtt_env["broker"]
+port = mqtt_env["port"]
+username = mqtt_env["username"]
+password = mqtt_env["password"]
+topic = mqtt_env["topic"]
 
 if not all([host, port, username, password, topic]):
     logging.error("Environment variables not set")
@@ -99,13 +103,13 @@ def on_message(client, userdata, message):
         response["time"] = convert_string_to_datetime(response["time"])
 
         # Apply Kalman filter to the RSSI values and store them
-        if message.topic == "receivers/1":
+        if message.topic == mqtt_env["topic"]+"/receivers/1":
             response["filtered_rssi"] = apply_kalman_filter(kf1, response["rssi"])
             receiver_1.append(response)
-        elif message.topic == "receivers/2":
+        elif message.topic == mqtt_env["topic"]+"/receivers/2":
             response["filtered_rssi"] = apply_kalman_filter(kf2, response["rssi"])
             receiver_2.append(response)
-        elif message.topic == "receivers/3":
+        elif message.topic == mqtt_env["topic"]+"/receivers/3":
             response["filtered_rssi"] = apply_kalman_filter(kf3, response["rssi"])
             receiver_3.append(response)
         else:
