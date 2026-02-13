@@ -1,4 +1,6 @@
+import matplotlib
 import matplotlib.gridspec as gridspec
+matplotlib.use('Qt5Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation

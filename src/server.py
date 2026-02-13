@@ -44,9 +44,9 @@ username = mqtt_env["username"]
 password = mqtt_env["password"]
 topic = mqtt_env["topic"]
 
-if not all([host, port, username, password, topic]):
-    logging.error("Environment variables not set")
-    exit(1)
+# if not all([host, port, username, password, topic]):
+#     logging.error("Environment variables not set")
+#     exit(1)
 
 # Create a client instance
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, "SubscriberClient")
@@ -138,7 +138,7 @@ if RUN_PIXEL_DISPLAY:
 
     # Create a global event loop
     loop = asyncio.new_event_loop()
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    # asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     asyncio.set_event_loop(loop)
 
     async def update_plot(x, y):
