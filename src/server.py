@@ -42,7 +42,7 @@ host = mqtt_env["broker"]
 port = mqtt_env["port"]
 username = mqtt_env["username"]
 password = mqtt_env["password"]
-topic = mqtt_env["topic"]
+topic = mqtt_env["topic"]+"/receivers/+"
 
 # if not all([host, port, username, password, topic]):
 #     logging.error("Environment variables not set")
