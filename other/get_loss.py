@@ -26,9 +26,11 @@ def calculate_path_loss_exponent(distance, measured_power, rssi):
 
 # Example Usage:
 # If at 5 meters, the RSSI is -70, and the 1-meter measured power is -50:
-d_i = float(input("Enter distance: "))
-a = -72.57
-rssi_val = float(input("Enter RSSI: "))
 
-n_result = calculate_path_loss_exponent(d_i, a, rssi_val)
-print(f"Path Loss Exponent (n): {n_result:.2f}")
+a = float(input("Enter RSS0: "))
+while (1):
+	d_i = float(input("Enter distance: "))
+	rssi_val = float(input("Enter RSSI: "))
+
+	n_result = calculate_path_loss_exponent(d_i, a, rssi_val)
+	print(f"Path Loss Exponent (n): {n_result:.2f}")
