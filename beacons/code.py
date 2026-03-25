@@ -13,7 +13,7 @@ from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
 
 # Get wifi details and more from a secrets.py file
 try:
-    from my_secrets import addresses_to_filter, mqtt_env, secrets, RECEIVER_NO
+    from my_secrets import addresses_to_filter, mqtt_env, RECEIVER_NO
 except ImportError:
     print("WiFi secrets are kept in secrets.py, please add them there!")
     raise
