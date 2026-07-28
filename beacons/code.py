@@ -1,14 +1,13 @@
 import json
 import ssl
 import time
+import socket
 
 import adafruit_minimqtt.adafruit_minimqtt as MQTT
 import adafruit_ntp
 # import socketpool
 # import wifi
-import socket
 from adafruit_ble import BLERadio
-from adafruit_ble.advertising import Advertisement
 from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
 
 # Get wifi details and more from a secrets.py file
@@ -72,12 +71,43 @@ def publish_message(message: str):
     mqtt_client.publish(mqtt_env["topic"]+"/receivers/"+str(RECEIVER_NO), message)
 
 
+def publish_status(message: str):
+    """Publish a status message (e.g. IP info) to the status topic."""
+    mqtt_client.publish(mqtt_env["topic"]+"/status/"+str(RECEIVER_NO), message)
+
+
 def get_time():
     current_time = ntp.datetime  # Fetch current time once
     year, month, day, hour, mins, secs, weekday, yearday, tm_isdst = current_time
     return "{:02d}/{:02d}/{} {:02d}:{:02d}:{:02d}".format(
         day, month, year, hour, mins, secs
     )
+
+
+def get_local_ip():
+    """Get the local IP address of this machine."""
+    try:
+        # Create a temporary socket to figure out our IP
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception as e:
+        print("Failed to get local IP:", e)
+        return "0.0.0.0"
+
+
+# --- Startup: report local IP ---
+local_ip = get_local_ip()
+print(f"Receiver #{RECEIVER_NO} local IP: {local_ip}")
+status_msg = json.dumps({
+    "receiver_no": RECEIVER_NO,
+    "ip": local_ip,
+    "status": "online",
+})
+publish_status(status_msg)
+print(f"Published startup status: {status_msg}")
 
 uuid_filter = "1111"  # Filter for advertisements containing this UUID
 # Start BLE scan for advertisements
