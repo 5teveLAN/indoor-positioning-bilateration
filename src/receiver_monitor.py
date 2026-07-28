@@ -18,6 +18,7 @@ import time
 from datetime import datetime
 
 import paho.mqtt.client as mqtt
+from paho.mqtt.enums import CallbackAPIVersion
 
 try:
     from my_secrets import mqtt_env
@@ -37,9 +38,9 @@ running = True
 receiver_map: dict[int, dict] = {}  # receiver_no -> {ip, last_seen, status}
 
 
-def on_connect(client, userdata, flags, rc):
-    if rc != 0:
-        logger.error(f"Failed to connect, return code: {rc}")
+def on_connect(client, userdata, flags, reason_code, properties):
+    if reason_code != 0:
+        logger.error(f"Failed to connect, return code: {reason_code}")
         return
 
     logger.info("Connected to MQTT broker")
@@ -48,7 +49,7 @@ def on_connect(client, userdata, flags, rc):
     client.subscribe(topic)
 
 
-def on_message(client, userdata, msg):
+def on_message(client, userdata, msg):  # noqa: F811
     try:
         payload = json.loads(msg.payload.decode("utf-8"))
         receiver_no = payload.get("receiver_no")
@@ -103,7 +104,7 @@ if __name__ == "__main__":
     username = mqtt_env.get("username")
     password = mqtt_env.get("password")
 
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, "ReceiverMonitor")
+    client = mqtt.Client(CallbackAPIVersion.VERSION2, "ReceiverMonitor")
     if username and password:
         client.username_pw_set(username, password)
 
