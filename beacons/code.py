@@ -116,7 +116,8 @@ uuid_filter = "1111"  # Filter for advertisements containing this UUID
 # Start BLE scan for advertisements
 def start_scan():
     # write a function to scan for BLE advertisements and print the address and RSSI
-    for advertisement in ble.start_scan(ProvideServicesAdvertisement):
+    print("Starting BLE scan...")
+    for advertisement in ble.start_scan(ProvideServicesAdvertisement, timeout=1):
         if isinstance(advertisement, ProvideServicesAdvertisement) and uuid_filter in str(advertisement.services):
             addr_bytes = advertisement.address.address_bytes
             addr_str = "".join("{:02x}".format(b) for b in addr_bytes).upper()
@@ -133,9 +134,11 @@ def start_scan():
             )
             publish_message(message)
 
-            ble.stop_scan()
+            # 找到目標後 break 離開迴圈（不要在這裡 stop_scan）
+            break
 
-    # ble.stop_scan()  # Ensure scanning is stopped before continuing
+    # 在 for 迴圈結束後（無論是 timeout 還是 break）統一停止掃描
+    ble.stop_scan()
     print("Scan done.")
 
 
@@ -149,7 +152,6 @@ def scan_ble_advertisements():
             addr_bytes = advertisement.address.address_bytes
             addr_str = ":".join("{:02X}".format(b) for b in addr_bytes)
             print(f"Device Address: {addr_str}, RSSI: {advertisement.rssi}")
-
     ble.stop_scan()
     print("BLE scan complete.")
 
@@ -168,3 +170,4 @@ while True:
         mqtt_client.disconnect()  # todo - only disconnect if we're stopping
         raise e
     time.sleep(2)  # sleep for 2 seconds before scanning again
+
