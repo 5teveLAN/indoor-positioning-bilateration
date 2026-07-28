@@ -31,8 +31,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
-Group=pi
+User=ggd
+Group=ggd
 WorkingDirectory=${WORKING_DIR}
 ExecStart=/usr/bin/python3 -u ${PYTHON_PATH}
 Restart=on-failure
