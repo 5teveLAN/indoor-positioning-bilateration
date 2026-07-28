@@ -34,11 +34,14 @@ counter = 0
 mqtt_client = MQTT.MQTT(
     broker=mqtt_env["broker"],
     port=mqtt_env["port"],
-    username=mqtt_env["username"],
-    password=mqtt_env["password"],
     socket_pool=pool,
     ssl_context=ssl.create_default_context(),
 )
+# Only set username/password if they are provided (None causes issues in some adafruit_minimqtt versions)
+if mqtt_env.get("username") is not None:
+    mqtt_client.username = mqtt_env["username"]
+if mqtt_env.get("password") is not None:
+    mqtt_client.password = mqtt_env["password"]
 
 
 # MQTT Event Handlers
