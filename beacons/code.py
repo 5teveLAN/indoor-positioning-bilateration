@@ -113,61 +113,70 @@ publish_status(status_msg)
 print(f"Published startup status: {status_msg}")
 
 uuid_filter = "1111"  # Filter for advertisements containing this UUID
+
+# BleakDBusError fallback
+try:
+    from bleak.exc import BleakDBusError
+except ImportError:
+    BleakDBusError = Exception
+
+
 # Start BLE scan for advertisements
 def start_scan():
     # write a function to scan for BLE advertisements and print the address and RSSI
     print("Starting BLE scan...")
-    for advertisement in ble.start_scan(ProvideServicesAdvertisement, timeout=1):
-        if isinstance(advertisement, ProvideServicesAdvertisement) and uuid_filter in str(advertisement.services):
-            addr_bytes = advertisement.address.address_bytes
-            addr_str = "".join("{:02x}".format(b) for b in addr_bytes).upper()
-            current_time_str = get_time()
-            print(addr_str, current_time_str, "RSSI:", advertisement.rssi)
+    scanner = None
+    try:
+        scanner = ble.start_scan(ProvideServicesAdvertisement, timeout=1)
+        for advertisement in scanner:
+            if isinstance(advertisement, ProvideServicesAdvertisement) and uuid_filter in str(advertisement.services):
+                addr_bytes = advertisement.address.address_bytes
+                addr_str = "".join("{:02x}".format(b) for b in addr_bytes).upper()
+                current_time_str = get_time()
+                print(addr_str, current_time_str, "RSSI:", advertisement.rssi)
 
-            # Send the message to the MQTT broker
-            message = json.dumps(
-                {
-                    "address": addr_str,
-                    "time": current_time_str,
-                    "rssi": advertisement.rssi,
-                }
-            )
-            publish_message(message)
+                # Send the message to the MQTT broker
+                message = json.dumps(
+                    {
+                        "address": addr_str,
+                        "time": current_time_str,
+                        "rssi": advertisement.rssi,
+                    }
+                )
+                publish_message(message)
 
-            # 找到目標後 break 離開迴圈（不要在這裡 stop_scan）
-            break
-
-    # 在 for 迴圈結束後（無論是 timeout 還是 break）統一停止掃描
-    ble.stop_scan()
+                # 找到目標後 break 離開迴圈
+                break
+    except BleakDBusError as e:
+        print(f"BLE DBus error during scan: {e}")
+        raise
+    finally:
+        # 確保 scan 一定被停止，並忽略停止時的 BleakDBusError
+        if scanner is not None:
+            try:
+                ble.stop_scan()
+            except BleakDBusError:
+                pass
+            except Exception:
+                pass
     print("Scan done.")
 
-
-def scan_ble_advertisements():
-    """
-    Scans for BLE advertisements and prints the address and RSSI of devices with UUID 0x1111.
-    """
-    print("Scanning for BLE advertisements...")
-    for advertisement in ble.start_scan(ProvideServicesAdvertisement):
-        if isinstance(advertisement, ProvideServicesAdvertisement) and "1111" in str(advertisement.services):
-            addr_bytes = advertisement.address.address_bytes
-            addr_str = ":".join("{:02X}".format(b) for b in addr_bytes)
-            print(f"Device Address: {addr_str}, RSSI: {advertisement.rssi}")
-    ble.stop_scan()
-    print("BLE scan complete.")
 
 
 while True:
     try:
         start_scan()
-        # scan_ble_advertisements()
+    except BleakDBusError as e:
+        print(f"BLE DBus error, retrying: {e}")
+        time.sleep(2)
+        continue
     except OSError as e:
-        ble.stop_scan()  # stop the scan before we try again
         print("Failed to scan: ", e)
+        time.sleep(2)
         continue
     except Exception as e:
         print("Unexpected error:", e)
-        ble.stop_scan()
-        mqtt_client.disconnect()  # todo - only disconnect if we're stopping
+        mqtt_client.disconnect()
         raise e
     time.sleep(2)  # sleep for 2 seconds before scanning again
 

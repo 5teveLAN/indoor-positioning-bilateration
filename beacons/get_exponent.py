@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-rssi/get_exponent.py — 程式一：路徑損耗參數量測
+beacons/get_exponent.py — 程式一：路徑損耗參數量測
 
 用途：
   互動式測量 BLE 路徑損耗參數 n (Path Loss Exponent) 與 A (Reference Power @ 1m)。
@@ -13,7 +13,7 @@ rssi/get_exponent.py — 程式一：路徑損耗參數量測
 
 執行方式：
   ssh 登入樹莓派後手動執行：
-      cd ~/indoor-positioning-bilateration/rssi
+      cd ~/indoor-positioning-bilateration/beacons
       python3 get_exponent.py
 
 參考：
@@ -35,16 +35,18 @@ SERVICE_NAME = "ble-beacon-scanner"
 SYSTEMCTL = "/usr/bin/systemctl" if os.path.exists("/usr/bin/systemctl") else "systemctl"
 
 # ─── BLE 相關 ────────────────────────────────
+UUID_FILTER = "1111"  # 只過濾包含此 UUID 的 BLE 廣告封包
+# ─── adafruit_ble ────────────────────────────
+# 使用與 code.py 相同的 BLE 函式庫，確保掃到相同裝置
+from adafruit_ble import BLERadio
+from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
+# BleakDBusError fallback
 try:
-    from adafruit_ble import BLERadio
-    from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
+    from bleak.exc import BleakDBusError
 except ImportError:
-    print("❌ 需要 adafruit-circuitpython-ble 套件。")
-    print("   請執行：pip install adafruit-circuitpython-ble")
-    sys.exit(1)
+    BleakDBusError = Exception
 
 ble = BLERadio()
-UUID_FILTER = "1111"
 
 # ─── 程式二管理 ──────────────────────────────
 
@@ -63,23 +65,54 @@ def _is_service_active() -> bool:
         return False
 
 
+def _is_code_py_running() -> bool:
+    """檢查 code.py 程序是否正在執行（以防 systemd 服務沒抓到）。"""
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "code.py"],
+            capture_output=True,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 def _stop_service():
-    """暫停程式二 (systemd 服務)。"""
+    """暫停程式二 (用 sudo 徹底關閉 + 重置藍牙)。"""
     global _service_was_running
+
+    # 1) 關 systemd 服務 (需要 sudo)
     if _is_service_active():
         print(f"\n🔧 偵測到「{SERVICE_NAME}」正在執行，暫時停止中...")
-        subprocess.run([SYSTEMCTL, "stop", SERVICE_NAME], check=True)
+        subprocess.run(["sudo", SYSTEMCTL, "stop", SERVICE_NAME], check=True)
         _service_was_running = True
-        print("✅ 已暫停。量測完成後會自動重啟。\n")
+        print("✅ 已暫停 systemd 服務。")
     else:
         _service_was_running = False
 
+    # 2) 補 kill 所有 code.py (含 root 權限的)
+    try:
+        subprocess.run(["pkill", "-f", "code.py"], capture_output=True, timeout=5)
+        subprocess.run(["sudo", "pkill", "-f", "code.py"], capture_output=True, timeout=5)
+    except Exception:
+        pass
+    time.sleep(0.5)
+
+    # 3) 重置藍牙適配器，釋放 BlueZ D-Bus 狀態
+    print("   🔄 重置藍牙適配器...")
+    subprocess.run(["sudo", "bluetoothctl", "power", "off"], capture_output=True, timeout=5)
+    time.sleep(0.5)
+    subprocess.run(["sudo", "bluetoothctl", "power", "on"], capture_output=True, timeout=5)
+    time.sleep(0.5)
+    print("✅ 藍牙已重置完成。\n")
+
 
 def _restart_service_if_needed():
-    """若之前暫停了程式二，現在重啟它。"""
+    """若之前暫停了程式二，現在重啟它 (需 sudo)。"""
     if _service_was_running:
         print(f"\n🔧 量測完成，重新啟動「{SERVICE_NAME}」...")
-        subprocess.run([SYSTEMCTL, "start", SERVICE_NAME], check=True)
+        subprocess.run(["sudo", SYSTEMCTL, "start", SERVICE_NAME], check=True)
         print("✅ 已重啟。\n")
 
 
@@ -103,23 +136,69 @@ class SimpleKalmanFilter:
 
 # ─── 核心函式 ────────────────────────────────
 
+def _scan_adafruit_once(timeout=1.5) -> list:
+    """
+    使用 adafruit_ble（與 code.py 相同）掃描一次，
+    回傳 [(mac_str, rssi), ...] 清單，只包含 ProvideServicesAdvertisement
+    且 services 字串包含 UUID_FILTER 的裝置。
+    """
+    results = []
+    scanner = None
+    try:
+        scanner = ble.start_scan(ProvideServicesAdvertisement, timeout=timeout)
+        for advertisement in scanner:
+            if not isinstance(advertisement, ProvideServicesAdvertisement):
+                continue
+            if UUID_FILTER not in str(advertisement.services):
+                continue
+            # MAC 轉成大寫無分隔格式（與 code.py 一致）
+            addr_bytes = advertisement.address.address_bytes
+            addr_str = "".join("{:02x}".format(b) for b in addr_bytes).upper()
+            results.append((addr_str, advertisement.rssi))
+            # 有找到就 break，一次掃描一個廣告
+            break
+    except BleakDBusError as e:
+        print(f"      ⚠️ BLE DBus error: {e}")
+        raise
+    finally:
+        if scanner is not None:
+            try:
+                ble.stop_scan()
+            except BleakDBusError:
+                pass
+            except Exception:
+                pass
+    return results
+
+
 def collect_filtered_rssi(sample_count=10) -> float:
-    """掃描 BLE 裝置，回傳 Kalman 濾波後的 RSSI 值。"""
+    """
+    使用 adafruit_ble 掃描 BLE 裝置，只取 UUID_FILTER 匹配裝置的 RSSI，
+    回傳 Kalman 濾波後的值。
+    """
     readings = []
-    print(f"  收集 {sample_count} 個樣本 (每秒 1 個)...")
+    print(f"  收集 {sample_count} 個樣本...")
 
     while len(readings) < sample_count:
-        found = False
-        for advertisement in ble.start_scan(ProvideServicesAdvertisement, timeout=0.8):
-            if UUID_FILTER in str(advertisement.services):
-                readings.append(advertisement.rssi)
-                print(f"    [{len(readings)}/{sample_count}] RSSI: {advertisement.rssi}")
-                found = True
-                break
-        ble.stop_scan()
-        if not found:
-            print("    ⚠️ 未偵測到訊號，重試中...")
-        time.sleep(1)
+        results = _scan_adafruit_once(timeout=1.2)
+        if results:
+            for addr_str, rssi in results:
+                if len(readings) < sample_count:
+                    readings.append(rssi)
+                    print(f"    [{len(readings)}/{sample_count}] RSSI: {rssi}  ({addr_str})")
+                else:
+                    break
+
+        if len(readings) == 0:
+            print("    ⚠️ 未偵測到目標裝置，重試中...")
+            time.sleep(1)
+        elif len(readings) < sample_count:
+            print(f"    ⚠️ 目前 {len(readings)}/{sample_count} 個樣本，繼續收集...")
+            time.sleep(0.5)
+
+    if not readings:
+        print("    ❌ 無法取得任何 RSSI 樣本！")
+        return -100.0
 
     kf = SimpleKalmanFilter(initial_value=readings[0])
     final_val = 0
@@ -167,7 +246,6 @@ def _signal_handler(sig, frame):
 
 
 # ─── 主流程 ──────────────────────────────────
-
 def main():
     # 註冊中斷處理 (Ctrl+C 時也要重啟服務)
     signal.signal(signal.SIGINT, _signal_handler)
@@ -180,11 +258,14 @@ def main():
 
     print("=" * 60)
     print("  BLE 路徑損耗參數量測工具")
+    print("  UUID 過濾:", UUID_FILTER)
+    print("  BLE 引擎: adafruit_ble (與 code.py 相同)")
     print("=" * 60)
 
     # --- Step 1: 校正 (1 公尺) ---
     print("\n📏 Step 1: 校正 (1 公尺)")
-    input("   請將手機放在距離感測器「1 公尺」處，然後按下 Enter ⏎...")
+    print(f"   目標: 掃描 UUID={UUID_FILTER} 的 BLE beacon")
+    input("   請將手機/beacon 放在距離感測器「1 公尺」處，然後按下 Enter ⏎...")
     measured_power = collect_filtered_rssi(10)
     print(f"   ✅ 參考功率 (A) @ 1m = {measured_power} dBm\n")
 
@@ -265,3 +346,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
