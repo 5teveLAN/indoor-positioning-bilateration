@@ -8,7 +8,7 @@
 #
 
 # ─── Configuration ────────────────────────────
-SERVICE_NAME="${1:-beacon.service}"
+SERVICE_NAME="${1:-ble-beacon-scanner.service}"
 LINES=50
 
 # ─── Color helpers ────────────────────────────
