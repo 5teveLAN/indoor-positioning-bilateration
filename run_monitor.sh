@@ -23,6 +23,6 @@ echo "Installing/updating requirements..."
 pip install -r src/requirements.txt --quiet
 
 # Run the server
-echo "Starting receiver_monitor.py..."
-python src/receiver_monitor.py
+echo "Starting mqtt_listener.py..."
+python tools/mqtt_listener.py
 

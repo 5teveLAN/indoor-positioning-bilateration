@@ -12,10 +12,18 @@ from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
 
 # Get wifi details and more from a secrets.py file
 try:
-    from my_secrets import addresses_to_filter, mqtt_env, RECEIVER_NO
+    from my_secrets import addresses_to_filter, mqtt_env, RECEIVER_NO, USE_TEST_MODE
 except ImportError:
     print("WiFi secrets are kept in secrets.py, please add them there!")
     raise
+
+# ─── 測試模式固定參數 ──────────────────────────
+# 參考 ble-packet-encryption.md 5.2
+TEST_XOR_KEY = "TEST_KEY_2024"
+
+# ─── Service UUID ────────────────────────────
+SERVICE_UUID_1111 = "00001111-0000-1000-8000-00805f9b34fb"
+SERVICE_UUID_SHORT = "1111"
 
 # Connect to WiFi
 # wifi.radio.connect(secrets["ssid"], secrets["password"])
@@ -112,8 +120,6 @@ status_msg = json.dumps({
 publish_status(status_msg)
 print(f"Published startup status: {status_msg}")
 
-uuid_filter = "1111"  # Filter for advertisements containing this UUID
-
 # BleakDBusError fallback
 try:
     from bleak.exc import BleakDBusError
@@ -121,37 +127,120 @@ except ImportError:
     BleakDBusError = Exception
 
 
-# Start BLE scan for advertisements
+# ─── XOR 解密 ──────────────────────────────────
+
+
+def xor_decrypt(encrypted_bytes: bytes, key: str) -> bytes:
+    """
+    XOR 解密：encrypted[i] = rawBytes[i] XOR keyBytes[i % keyBytes.length]
+    參考 ble-packet-encryption.md 3.2
+    """
+    key_bytes = key.encode("utf-8")
+    result = bytearray(len(encrypted_bytes))
+    for i, b in enumerate(encrypted_bytes):
+        result[i] = b ^ key_bytes[i % len(key_bytes)]
+    return bytes(result)
+
+
+def extract_student_id(advertisement, xor_key: str = TEST_XOR_KEY):
+    """
+    從 BLE 廣告封包中提取 Service Data → XOR 解密 → 取出學號。
+
+    回傳 (student_id, mac_str) 或 (None, mac_str) 若失敗。
+    """
+    # 取得 MAC
+    addr_bytes = advertisement.address.address_bytes
+    mac_str = "".join("{:02x}".format(b) for b in addr_bytes).upper()
+
+    # 提取 Service Data (AD Type 0x16 = Service Data - 16-bit UUID)
+    service_data = b""
+    try:
+        if hasattr(advertisement, "data_dict") and advertisement.data_dict:
+            SERVICE_DATA_16BIT_UUID = 0x16
+            if SERVICE_DATA_16BIT_UUID in advertisement.data_dict:
+                raw = advertisement.data_dict[SERVICE_DATA_16BIT_UUID]
+                if len(raw) > 2:
+                    service_data = raw[2:]  # 跳過 2 bytes UUID
+    except Exception:
+        pass
+
+    if not service_data or len(service_data) < 15:
+        return None, mac_str
+
+    try:
+        encrypted = service_data[:15]
+        decrypted = xor_decrypt(encrypted, xor_key)
+        plaintext = decrypted.decode("utf-8", errors="replace")
+
+        # 解析 student_id|otp
+        if "|" not in plaintext:
+            return None, mac_str
+
+        student_id = plaintext.split("|", 1)[0].strip()
+
+        # 基本驗證：學號應為 8 位數字
+        if not student_id.isdigit() or len(student_id) != 8:
+            print(f"    ⚠️ 學號格式異常: {student_id}")
+            return None, mac_str
+
+        return student_id, mac_str
+    except Exception as e:
+        print(f"    ⚠️ 解密失敗 {mac_str}: {e}")
+        return None, mac_str
+
+
+# ─── BLE 掃描 ──────────────────────────────
+
+
 def start_scan():
-    # write a function to scan for BLE advertisements and print the address and RSSI
-    print("Starting BLE scan...")
+    """
+    掃描 BLE 廣告封包，收集所有 UUID=1111 的裝置。
+
+    對每個封包：解密 → 取出 student_id → MQTT publish
+    不再 break 只找一個，不負責 Kalman 濾波（留給伺服器）。
+    """
+    print("Starting BLE scan (multi-device mode)...")
     scanner = None
+    devices_found = []
+
+    # 決定要用哪個 XOR Key
+    if USE_TEST_MODE:
+        xor_key = TEST_XOR_KEY
+        print(f"    🔑 測試模式，XOR Key: {xor_key}")
+    else:
+        # TODO: 正式模式下向後端 API 取得 XOR Key
+        xor_key = TEST_XOR_KEY
+        print(f"    ⚠️ 正式模式尚未實作 API，暫時使用測試 Key")
+
     try:
         scanner = ble.start_scan(ProvideServicesAdvertisement, timeout=1)
         for advertisement in scanner:
-            if isinstance(advertisement, ProvideServicesAdvertisement) and uuid_filter in str(advertisement.services):
-                addr_bytes = advertisement.address.address_bytes
-                addr_str = "".join("{:02x}".format(b) for b in addr_bytes).upper()
-                current_time_str = get_time()
-                print(addr_str, current_time_str, "RSSI:", advertisement.rssi)
+            if not isinstance(advertisement, ProvideServicesAdvertisement):
+                continue
+            if SERVICE_UUID_SHORT not in str(advertisement.services):
+                continue
 
-                # Send the message to the MQTT broker
-                message = json.dumps(
-                    {
-                        "address": addr_str,
-                        "time": current_time_str,
-                        "rssi": advertisement.rssi,
-                    }
-                )
-                publish_message(message)
+            rssi = advertisement.rssi
+            current_time_str = get_time()
 
-                # 找到目標後 break 離開迴圈
-                break
+            # 解密取出 student_id
+            student_id, mac_str = extract_student_id(advertisement, xor_key)
+            if student_id is None:
+                continue
+
+            print(f"  ✅ {mac_str} → 學號:{student_id} RSSI:{rssi}")
+
+            devices_found.append({
+                "student_id": student_id,
+                "mac": mac_str,
+                "rssi": rssi,
+                "time": current_time_str,
+            })
+
     except BleakDBusError as e:
         print(f"BLE DBus error during scan: {e}")
         raise
     finally:
-        # 確保 scan 一定被停止，並忽略停止時的 BleakDBusError
         if scanner is not None:
             try:
                 ble.stop_scan()
@@ -159,6 +248,23 @@ def start_scan():
                 pass
             except Exception:
                 pass
+
+    # 批次發布 MQTT（每個學生一則）
+    if devices_found:
+        print(f"  發布 {len(devices_found)} 筆資料到 MQTT...")
+        for device in devices_found:
+            message = json.dumps({
+                "student_id": device["student_id"],
+                "mac": device["mac"],
+                "rssi": device["rssi"],
+                "scanner_id": RECEIVER_NO,
+                "time": device["time"],
+            })
+            publish_message(message)
+            print(f"    📤 {device['student_id']} RSSI:{device['rssi']}")
+    else:
+        print("  本次掃描未發現有效裝置。")
+
     print("Scan done.")
 
 
