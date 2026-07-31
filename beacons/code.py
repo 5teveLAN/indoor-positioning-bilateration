@@ -217,7 +217,28 @@ def start_scan():
         for advertisement in scanner:
             if not isinstance(advertisement, ProvideServicesAdvertisement):
                 continue
-            if SERVICE_UUID_SHORT not in str(advertisement.services):
+
+            # ── Debug: log every BLE packet seen ─────────────
+            services_str = str(advertisement.services)
+            addr_bytes = advertisement.address.address_bytes
+            debug_mac = "".join("{:02x}".format(b) for b in addr_bytes).upper()
+
+            # 檢查是否有我們的 Service UUID
+            is_target_uuid = SERVICE_UUID_SHORT in services_str
+            if is_target_uuid:
+                print(f"  📡 TARGET UUID MATCH! MAC:{debug_mac} RSSI:{advertisement.rssi}")
+                print(f"       Services: {services_str}")
+                # 嘗試打印 raw data_dict 幫助除錯
+                if hasattr(advertisement, "data_dict"):
+                    print(f"       data_dict keys: {list(advertisement.data_dict.keys()) if advertisement.data_dict else 'None'}")
+                    if advertisement.data_dict and 0x16 in advertisement.data_dict:
+                        raw_hex = advertisement.data_dict[0x16].hex()
+                        print(f"       Service Data (0x16) hex: {raw_hex}")
+            else:
+                # 可選：印出非目標封包的 MAC 前幾碼（幫助確認掃描正在工作）
+                pass  # 取消註解下一行可印出所有封包: print(f"  📡 SKIP (not target UUID): {debug_mac}")
+
+            if not is_target_uuid:
                 continue
 
             rssi = advertisement.rssi
@@ -236,7 +257,6 @@ def start_scan():
                 "rssi": rssi,
                 "time": current_time_str,
             })
-
     except BleakDBusError as e:
         print(f"BLE DBus error during scan: {e}")
         raise
