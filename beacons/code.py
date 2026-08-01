@@ -1,14 +1,20 @@
+"""
+BLE Beacon Scanner (bleak 版本)
+
+改用 bleak (BlueZ) 做 *active scan*，主動觸發 scan response，
+以取得手機 App 放在 scan response 裡的 Service Data (AD Type 0x16)。
+原 adafruit_ble 在 BlueZ 上不易收到 scan response，故改用 bleak。
+"""
+
+import asyncio
 import json
-import ssl
+import socket as _socket
 import time
-import socket
+
+from bleak import BleakScanner
+from bleak.exc import BleakError
 
 import adafruit_minimqtt.adafruit_minimqtt as MQTT
-import adafruit_ntp
-# import socketpool
-# import wifi
-from adafruit_ble import BLERadio
-from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
 
 # Get wifi details and more from a secrets.py file
 try:
@@ -22,30 +28,18 @@ except ImportError:
 TEST_XOR_KEY = "TEST_KEY_2024"
 
 # ─── Service UUID ────────────────────────────
-SERVICE_UUID_1111 = "00001111-0000-1000-8000-00805f9b34fb"
+# 學生端 App 廣播時用的完整 UUID
+SERVICE_UUID = "00001111-0000-1000-8000-00805f9b34fb"
+# 縮短成 16-bit 的表示法，用來比對 service_data / service_uuids 的 key
 SERVICE_UUID_SHORT = "1111"
 
-# Connect to WiFi
-# wifi.radio.connect(secrets["ssid"], secrets["password"])
-
-# Create a socket pool
-pool = socket
-
-# Get time server (Network Time Protocol)
-ntp = adafruit_ntp.NTP(pool, tz_offset=0)
-
-# Bluetooth
-ble = BLERadio()
-counter = 0
-
-# Set up MQTT client
+# ─── MQTT 設定 ──────────────────────────────
 mqtt_client = MQTT.MQTT(
     broker=mqtt_env["broker"],
     port=mqtt_env["port"],
-    socket_pool=pool,
-    ssl_context=ssl.create_default_context(),
+    socket_pool=_socket,
+    ssl_context=None,
 )
-# Only set username/password if they are provided (None causes issues in some adafruit_minimqtt versions)
 if mqtt_env.get("username") is not None:
     mqtt_client.username = mqtt_env["username"]
 if mqtt_env.get("password") is not None:
@@ -66,40 +60,29 @@ def __mqtt_publish_handler(mqtt_client, userdata, topic, pid):
     print("Published to {0} with PID {1}".format(topic, pid))
 
 
-# Set the event handlers
 mqtt_client.on_connect = __mqtt_connect_handler
 mqtt_client.on_disconnect = __mqtt_disconnect_handler
 mqtt_client.on_publish = __mqtt_publish_handler
 
 
-# Connect to the MQTT broker
-print(f"Trying to connect to MQTT broker - {mqtt_client.broker}")
-mqtt_client.connect()
-
-
-# Publish a message
 def publish_message(message: str):
-    mqtt_client.publish(mqtt_env["topic"]+"/receivers/"+str(RECEIVER_NO), message)
+    mqtt_client.publish(mqtt_env["topic"] + "/receivers/" + str(RECEIVER_NO), message)
 
 
 def publish_status(message: str):
     """Publish a status message (e.g. IP info) to the status topic."""
-    mqtt_client.publish(mqtt_env["topic"]+"/status/"+str(RECEIVER_NO), message)
+    mqtt_client.publish(mqtt_env["topic"] + "/status/" + str(RECEIVER_NO), message)
 
 
 def get_time():
-    current_time = ntp.datetime  # Fetch current time once
-    year, month, day, hour, mins, secs, weekday, yearday, tm_isdst = current_time
-    return "{:02d}/{:02d}/{} {:02d}:{:02d}:{:02d}".format(
-        day, month, year, hour, mins, secs
-    )
+    """回傳目前本地時間字串 (dd/mm/yyyy HH:MM:SS)。"""
+    return time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())
 
 
 def get_local_ip():
     """Get the local IP address of this machine."""
     try:
-        # Create a temporary socket to figure out our IP
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
         s.close()
@@ -108,6 +91,10 @@ def get_local_ip():
         print("Failed to get local IP:", e)
         return "0.0.0.0"
 
+
+# 先連接 MQTT，之後的 publish_status 才能成功
+print(f"Trying to connect to MQTT broker - {mqtt_client.broker}")
+mqtt_client.connect()
 
 # --- Startup: report local IP ---
 local_ip = get_local_ip()
@@ -118,13 +105,6 @@ status_msg = json.dumps({
     "status": "online",
 })
 publish_status(status_msg)
-print(f"Published startup status: {status_msg}")
-
-# BleakDBusError fallback
-try:
-    from bleak.exc import BleakDBusError
-except ImportError:
-    BleakDBusError = Exception
 
 
 # ─── XOR 解密 ──────────────────────────────────
@@ -142,134 +122,172 @@ def xor_decrypt(encrypted_bytes: bytes, key: str) -> bytes:
     return bytes(result)
 
 
-def extract_student_id(advertisement, xor_key: str = TEST_XOR_KEY):
+def extract_student_id(service_data: bytes, mac_str: str, xor_key: str = TEST_XOR_KEY):
     """
-    從 BLE 廣告封包中提取 Service Data → XOR 解密 → 取出學號。
+    從 bleak 取得的 Service Data payload 中 XOR 解密 → 取出學號。
 
-    回傳 (student_id, mac_str) 或 (None, mac_str) 若失敗。
+    注意：bleak 的 service_data dict value 已經「去掉 UUID 前綴」，
+    所以 service_data 傳入的就是純加密 payload。
+
+    回傳 student_id 或 None。
     """
-    # 取得 MAC
-    addr_bytes = advertisement.address.address_bytes
-    mac_str = "".join("{:02x}".format(b) for b in addr_bytes).upper()
-
-    # 提取 Service Data (AD Type 0x16 = Service Data - 16-bit UUID)
-    service_data = b""
-    try:
-        if hasattr(advertisement, "data_dict") and advertisement.data_dict:
-            SERVICE_DATA_16BIT_UUID = 0x16
-            if SERVICE_DATA_16BIT_UUID in advertisement.data_dict:
-                raw = advertisement.data_dict[SERVICE_DATA_16BIT_UUID]
-                if len(raw) > 2:
-                    service_data = raw[2:]  # 跳過 2 bytes UUID
-    except Exception:
-        pass
-
     if not service_data or len(service_data) < 15:
-        return None, mac_str
+        print(f"    ⚠️ {mac_str} service_data 不足 (len={len(service_data)}): "
+              f"{service_data.hex() if service_data else '(空)'}")
+        return None
 
     try:
         encrypted = service_data[:15]
         decrypted = xor_decrypt(encrypted, xor_key)
         plaintext = decrypted.decode("utf-8", errors="replace")
 
-        # 解析 student_id|otp
         if "|" not in plaintext:
-            return None, mac_str
+            print(f"    ⚠️ {mac_str} XOR 解密結果沒有分隔符 '|'")
+            print(f"          解密後 bytes={decrypted.hex()}")
+            print(f"          解密後文字={plaintext!r}")
+            print(f"          (XOR Key={xor_key!r}, 原始 service_data={service_data.hex()})")
+            return None
 
         student_id = plaintext.split("|", 1)[0].strip()
-
-        # 基本驗證：學號應為 8 位數字
         if not student_id.isdigit() or len(student_id) != 8:
             print(f"    ⚠️ 學號格式異常: {student_id}")
-            return None, mac_str
+            return None
 
-        return student_id, mac_str
+        return student_id
     except Exception as e:
         print(f"    ⚠️ 解密失敗 {mac_str}: {e}")
-        return None, mac_str
+        return None
 
 
-# ─── BLE 掃描 ──────────────────────────────
+def _is_target_uuid(uuid_str):
+    """判斷某個 UUID 字串是否屬於我們的 SERVICE_UUID (1111)。"""
+    upper = str(uuid_str).upper()
+    return SERVICE_UUID_SHORT in upper or SERVICE_UUID.upper() in upper
+
+
+def _find_service_data(adv):
+    """
+    在 bleak 的 AdvertisementData.service_data dict 中，找出 UUID=1111
+    對應的加密 payload。回傳 bytes 或 None。
+    """
+    sd = adv.service_data or {}
+    for key, val in sd.items():
+        if _is_target_uuid(key):
+            return bytes(val)
+    return None
+
+
+async def _scan_once(timeout: float = 3.0):
+    """
+    執行一次 active scan，回傳符合條件裝置的清單。
+    每筆：{"mac": str, "rssi": int, "payload": bytes}
+
+    使用 BleakScanner detection_callback（bleak 2.x 標準 API），
+    scanning_mode="active" 會觸發 scan response。
+    """
+    found = []
+    seen_macs = set()
+
+    def _detection_callback(device, advertisement_data):
+        nonlocal found
+        mac = str(getattr(device, "address", "") or "").replace(":", "").upper()
+        rssi = getattr(advertisement_data, "rssi", None)
+        sd = getattr(advertisement_data, "service_data", None) or {}
+        service_uuids = list(getattr(advertisement_data, "service_uuids", []) or [])
+        local_name = getattr(advertisement_data, "local_name", None)
+        manufacturer_data = getattr(advertisement_data, "manufacturer_data", None)
+        tx_power = getattr(advertisement_data, "tx_power", None)
+
+        # Debug：印出所有掃到的裝置（前 5 台）
+        if mac not in seen_macs:
+            seen_macs.add(mac)
+            if len(seen_macs) <= 5:
+                print(f"       [SCAN] {mac} RSSI:{rssi} "
+                      f"uuids={service_uuids} sd={list(sd.keys()) if sd else None} "
+                      f"name={local_name!r}")
+
+        # 判斷是不是目標裝置
+        is_target = _is_target_uuid(local_name) if local_name else False
+        for u in service_uuids:
+            if _is_target_uuid(u):
+                is_target = True
+                break
+        if not is_target and sd:
+            for k in sd.keys():
+                if _is_target_uuid(k):
+                    is_target = True
+                    break
+
+        # Debug：印出目標封包
+        if is_target:
+            print(f"  📡 TARGET UUID MATCH! MAC:{mac} RSSI:{rssi}")
+            print(f"       service_data keys: {list(sd.keys()) if sd else 'None'}")
+            print(f"       service_data (raw): {sd}")
+            print(f"       full: rssi={rssi}, service_uuids={service_uuids}, "
+                  f"local_name={local_name}, manufacturer_data={manufacturer_data}, "
+                  f"tx_power={tx_power}")
+
+            payload = None
+            for key, val in sd.items():
+                if _is_target_uuid(key):
+                    payload = bytes(val)
+                    break
+            if payload is not None:
+                found.append({"mac": mac, "rssi": rssi, "payload": payload})
+
+    scanner = BleakScanner(
+        detection_callback=_detection_callback,
+        scanning_mode="active",
+    )
+    await scanner.start()
+    await asyncio.sleep(timeout)
+    await scanner.stop()
+    return found
 
 
 def start_scan():
     """
-    掃描 BLE 廣告封包，收集所有 UUID=1111 的裝置。
-
-    對每個封包：解密 → 取出 student_id → MQTT publish
-    不再 break 只找一個，不負責 Kalman 濾波（留給伺服器）。
+    使用 bleak active scan 掃描 BLE 廣告封包。
+    收集所有 UUID=1111 且帶 Service Data 的裝置 → XOR 解密 → MQTT publish。
     """
-    print("Starting BLE scan (multi-device mode)...")
-    scanner = None
+    print("Starting BLE scan (bleak / active mode)...")
     devices_found = []
 
-    # 決定要用哪個 XOR Key
+    xor_key = TEST_XOR_KEY
     if USE_TEST_MODE:
-        xor_key = TEST_XOR_KEY
         print(f"    🔑 測試模式，XOR Key: {xor_key}")
     else:
-        # TODO: 正式模式下向後端 API 取得 XOR Key
-        xor_key = TEST_XOR_KEY
         print(f"    ⚠️ 正式模式尚未實作 API，暫時使用測試 Key")
 
     try:
-        scanner = ble.start_scan(ProvideServicesAdvertisement, timeout=1)
-        for advertisement in scanner:
-            if not isinstance(advertisement, ProvideServicesAdvertisement):
-                continue
+        results = asyncio.run(_scan_once(timeout=3.0))
 
-            # ── Debug: log every BLE packet seen ─────────────
-            services_str = str(advertisement.services)
-            addr_bytes = advertisement.address.address_bytes
-            debug_mac = "".join("{:02x}".format(b) for b in addr_bytes).upper()
+        for dev in results:
+            mac_str = dev["mac"]
+            rssi = dev["rssi"]
+            payload = dev["payload"]
+            print(f"       [DBG {mac_str}] service_data payload({len(payload)}B)={payload.hex()}")
 
-            # 檢查是否有我們的 Service UUID
-            is_target_uuid = SERVICE_UUID_SHORT in services_str
-            if is_target_uuid:
-                print(f"  📡 TARGET UUID MATCH! MAC:{debug_mac} RSSI:{advertisement.rssi}")
-                print(f"       Services: {services_str}")
-                # 嘗試打印 raw data_dict 幫助除錯
-                if hasattr(advertisement, "data_dict"):
-                    print(f"       data_dict keys: {list(advertisement.data_dict.keys()) if advertisement.data_dict else 'None'}")
-                    if advertisement.data_dict and 0x16 in advertisement.data_dict:
-                        raw_hex = advertisement.data_dict[0x16].hex()
-                        print(f"       Service Data (0x16) hex: {raw_hex}")
-            else:
-                # 可選：印出非目標封包的 MAC 前幾碼（幫助確認掃描正在工作）
-                pass  # 取消註解下一行可印出所有封包: print(f"  📡 SKIP (not target UUID): {debug_mac}")
-
-            if not is_target_uuid:
-                continue
-
-            rssi = advertisement.rssi
-            current_time_str = get_time()
-
-            # 解密取出 student_id
-            student_id, mac_str = extract_student_id(advertisement, xor_key)
+            student_id = extract_student_id(payload, mac_str, xor_key)
             if student_id is None:
                 continue
 
             print(f"  ✅ {mac_str} → 學號:{student_id} RSSI:{rssi}")
-
             devices_found.append({
                 "student_id": student_id,
                 "mac": mac_str,
                 "rssi": rssi,
-                "time": current_time_str,
+                "time": get_time(),
             })
-    except BleakDBusError as e:
-        print(f"BLE DBus error during scan: {e}")
-        raise
-    finally:
-        if scanner is not None:
-            try:
-                ble.stop_scan()
-            except BleakDBusError:
-                pass
-            except Exception:
-                pass
 
-    # 批次發布 MQTT（每個學生一則）
+    except BleakError as e:
+        print(f"BLE bleak error during scan: {e}")
+        raise
+    except Exception as e:
+        print(f"Unexpected scan error: {e}")
+        raise
+
+    # 批次發布 MQTT
     if devices_found:
         print(f"  發布 {len(devices_found)} 筆資料到 MQTT...")
         for device in devices_found:
@@ -288,21 +306,28 @@ def start_scan():
     print("Scan done.")
 
 
+def main():
+    while True:
+        try:
+            start_scan()
+        except BleakError as e:
+            print(f"BLE bleak error, retrying: {e}")
+            time.sleep(2)
+            continue
+        except OSError as e:
+            print("Failed to scan: ", e)
+            time.sleep(2)
+            continue
+        except Exception as e:
+            print("Unexpected error:", e)
+            try:
+                mqtt_client.disconnect()
+            except Exception:
+                pass
+            raise e
+        time.sleep(2)
 
-while True:
-    try:
-        start_scan()
-    except BleakDBusError as e:
-        print(f"BLE DBus error, retrying: {e}")
-        time.sleep(2)
-        continue
-    except OSError as e:
-        print("Failed to scan: ", e)
-        time.sleep(2)
-        continue
-    except Exception as e:
-        print("Unexpected error:", e)
-        mqtt_client.disconnect()
-        raise e
-    time.sleep(2)  # sleep for 2 seconds before scanning again
+
+if __name__ == "__main__":
+    main()
 
