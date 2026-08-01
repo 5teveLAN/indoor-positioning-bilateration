@@ -168,3 +168,5 @@ final
 
 # Any temp files
 *.tmp
+.DS_Store
+.gitignore
