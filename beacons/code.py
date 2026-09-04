@@ -9,6 +9,7 @@ BLE Beacon Scanner (bleak 版本)
 import asyncio
 import json
 import socket as _socket
+import threading
 import time
 
 from bleak import BleakScanner
@@ -26,6 +27,11 @@ except ImportError:
 # ─── 測試模式固定參數 ──────────────────────────
 # 參考 ble-packet-encryption.md 5.2
 TEST_XOR_KEY = "TEST_KEY_2024"
+
+# ─── 全域 XOR Key（可被 MQTT session_key 更新）────
+# 初始值視模式而定：測試模式用固定 TEST_XOR_KEY，
+# 正式模式待收到 Server 發布的 session_key 後更新。
+CURRENT_XOR_KEY = TEST_XOR_KEY
 
 # ─── Service UUID ────────────────────────────
 # 學生端 App 廣播時用的完整 UUID
@@ -92,9 +98,85 @@ def get_local_ip():
         return "0.0.0.0"
 
 
+# ─── 參與 Session：訂閱 XOR Key ─────────────────
+# Server 開始點名時會發布最新 Session XOR Key 到
+# {topic}/session_key（retained），本機訂閱並即時更新解密金鑰。
+SESSION_KEY_TOPIC = mqtt_env["topic"] + "/session_key"
+
+# ─── 主迴圈內的 BLE 掃描 ─────────────────────────
+
+
+def handle_session_key(payload: str):
+    """解析 server 發布的 session XOR key 並更新全域 CURRENT_XOR_KEY。"""
+    global CURRENT_XOR_KEY
+    try:
+        data = json.loads(payload)
+    except (ValueError, TypeError):
+        print(f"    ⚠️ session_key payload 不是合法 JSON: {payload!r}")
+        return
+
+    # 相容兩種欄位命名：1.1 文件用 "XOR_key"，2.2 API 用 "xor_key"
+    new_key = data.get("XOR_key") or data.get("xor_key")
+    if not new_key or not isinstance(new_key, str):
+        print(f"    ⚠️ session_key payload 缺少 XOR key 欄位: {data}")
+        return
+
+    if new_key != CURRENT_XOR_KEY:
+        CURRENT_XOR_KEY = new_key
+        print(f"  🔑 已更新 Session XOR Key 為 {CURRENT_XOR_KEY!r}")
+    else:
+        print(f"  🔑 Session XOR Key 未變更 ({CURRENT_XOR_KEY!r})")
+
+
+def __mqtt_message_handler(client, topic, message):
+    try:
+        topic_str = str(topic)
+        payload_str = (
+            message if isinstance(message, str)
+            else message.decode("utf-8", errors="replace")
+        )
+    except Exception as e:
+        print(f"    ⚠️ 解析 MQTT 訊息失敗: {e}")
+        return
+
+    if topic_str == SESSION_KEY_TOPIC:
+        handle_session_key(payload_str)
+    else:
+        # 其他（未訂閱）訊息，略過
+        pass
+
+
+mqtt_client.on_message = __mqtt_message_handler
+
+
+def _mqtt_loop_thread():
+    """背景執行緒：持續呼叫 loop() 處理伺服器送來的訊息（含 session_key）。"""
+    print(f"    📡 訂閱 Session XOR Key Topic: {SESSION_KEY_TOPIC}")
+    while True:
+        try:
+            # loop() 期間若斷線會拋出例外，於下方重連。
+            mqtt_client.loop(timeout=1.0)
+        except Exception as e:
+            print(f"    ⚠️ MQTT loop 錯誤 ({type(e).__name__}): {e}")
+            try:
+                if not mqtt_client.is_connected():
+                    print("    🔄 重新連接 MQTT...")
+                    mqtt_client.reconnect(resub_topics=True)
+            except Exception as rc:
+                print(f"    ⚠️ MQTT re-connect 失敗: {rc}")
+            time.sleep(2)
+
+
 # 先連接 MQTT，之後的 publish_status 才能成功
 print(f"Trying to connect to MQTT broker - {mqtt_client.broker}")
 mqtt_client.connect()
+
+# 訂閱 session_key（retained：開機即能收到上一場 session 的金鑰）
+mqtt_client.subscribe(SESSION_KEY_TOPIC)
+
+# 啟動背景接收執行緒（daemon，隨主程式結束而停止）
+_thread = threading.Thread(target=_mqtt_loop_thread, name="mqtt-receiver", daemon=True)
+_thread.start()
 
 # --- Startup: report local IP ---
 local_ip = get_local_ip()
@@ -253,11 +335,10 @@ def start_scan():
     print("Starting BLE scan (bleak / active mode)...")
     devices_found = []
 
-    xor_key = TEST_XOR_KEY
-    if USE_TEST_MODE:
-        print(f"    🔑 測試模式，XOR Key: {xor_key}")
-    else:
-        print(f"    ⚠️ 正式模式尚未實作 API，暫時使用測試 Key")
+    # 使用目前最新的 Session XOR Key（可被 mqtt session_key 即時更新）
+    xor_key = CURRENT_XOR_KEY
+    print(f"    🔑 目前使用 XOR Key: {xor_key!r}"
+          + ("（測試模式初始值）" if USE_TEST_MODE and xor_key == TEST_XOR_KEY else ""))
 
     try:
         results = asyncio.run(_scan_once(timeout=3.0))
