@@ -11,6 +11,13 @@ services:
             - ./log:/mosquitto/log:rw
         restart: unless-stopped
 
+    cloudflared:
+        image: cloudflare/cloudflared:latest
+        container_name: cloudflared
+        restart: unless-stopped
+        command: tunnel --no-autoupdate run --token eyJhIjoiZTAyNzE3Y2ExMDI5MGIyYmMxYzk3ZTM0ODAwNTY5ZGMiLCJ0IjoiOTM3OTZjMzgtOTdkZi00N2E3LWI1YjUtNjU2MGU5Zjk4OTQyIiwicyI6Ik5ESmhPV05pWmprdE5ERmxaQzAwT0RCaExUazNaamN0Tm1aaE1qRTFZelZoTmpVdyJ9
+        depends_on:
+            - mosquitto
 networks:
     default:
         name: mqtt-network
