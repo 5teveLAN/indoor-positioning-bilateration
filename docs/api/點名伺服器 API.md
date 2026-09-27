@@ -1,19 +1,19 @@
-- [1. 後端 API 規格](2.3%20Node.js%20主程式%20API.md#1-後端-api-規格)
-  - [1.1 老師：開始點名 Session](2.3%20Node.js%20主程式%20API.md#11-老師開始點名-session)
-  - [1.2 老師：取得 OTP 驗證對照表](2.3%20Node.js%20主程式%20API.md#12-老師取得-otp-驗證對照表)
-  - [1.3 學生：取得個人 OTP 與 XOR Key](2.3%20Node.js%20主程式%20API.md#13-學生取得個人-otp-與-xor-key)
-  - [1.4 登入](2.3%20Node.js%20主程式%20API.md#14-登入)
-  - [1.5 註冊](2.3%20Node.js%20主程式%20API.md#15-註冊)
-  - [1.6 請求驗證碼](2.3%20Node.js%20主程式%20API.md#16-請求驗證碼)
-  - [1.7 上傳點名紀錄（舊接口保留）](2.3%20Node.js%20主程式%20API.md#17-上傳點名紀錄舊接口保留)
-- [2. 跟定位有關的 API](2.3%20Node.js%20主程式%20API.md#2-跟定位有關的-api)
-  - [2.0 資料流與設計原則](2.3%20Node.js%20主程式%20API.md#20-資料流與設計原則)
-  - [2.1 定位計算程式：上傳座標（定位計算 → Node）](2.3%20Node.js%20主程式%20API.md#21-定位計算程式上傳座標定位計算--node)
-  - [2.2 App：取得本次點名所有學生座標（App → Node）](2.3%20Node.js%20主程式%20API.md#22-app取得本次點名所有學生座標app--node)
-  - [2.3 座標暫存（Buffer）資料結構](2.3%20Node.js%20主程式%20API.md#23-座標暫存buffer資料結構)
-  - [2.4 老師：清除本次定位資料](2.3%20Node.js%20主程式%20API.md#24-老師清除本次定位資料)
-  - [2.5 定位 API 時序圖（完整串接）](2.3%20Node.js%20主程式%20API.md#25-定位-api-時序圖完整串接)
-  - [2.6 安全檢查表（上線前逐項確認）](2.3%20Node.js%20主程式%20API.md#26-安全檢查表上線前逐項確認)
+- [1. 後端 API 規格](點名伺服器%20API.md#1-後端-api-規格)
+  - [1.1 老師：開始點名 Session](點名伺服器%20API.md#11-老師開始點名-session)
+  - [1.2 老師：取得 OTP 驗證對照表](點名伺服器%20API.md#12-老師取得-otp-驗證對照表)
+  - [1.3 學生：取得個人 OTP 與 XOR Key](點名伺服器%20API.md#13-學生取得個人-otp-與-xor-key)
+  - [1.4 登入](點名伺服器%20API.md#14-登入)
+  - [1.5 註冊](點名伺服器%20API.md#15-註冊)
+  - [1.6 請求驗證碼](點名伺服器%20API.md#16-請求驗證碼)
+  - [1.7 上傳點名紀錄（舊接口保留）](點名伺服器%20API.md#17-上傳點名紀錄舊接口保留)
+- [2. 跟定位有關的 API](點名伺服器%20API.md#2-跟定位有關的-api)
+  - [2.0 資料流與設計原則](點名伺服器%20API.md#20-資料流與設計原則)
+  - [2.1 定位計算程式：上傳座標（定位計算 → Node）](點名伺服器%20API.md#21-定位計算程式上傳座標定位計算--node)
+  - [2.2 App：取得本次點名所有學生座標（App → Node）](點名伺服器%20API.md#22-app取得本次點名所有學生座標app--node)
+  - [2.3 座標暫存（Buffer）資料結構](點名伺服器%20API.md#23-座標暫存buffer資料結構)
+  - [2.4 老師：清除本次定位資料](點名伺服器%20API.md#24-老師清除本次定位資料)
+  - [2.5 定位 API 時序圖（完整串接）](點名伺服器%20API.md#25-定位-api-時序圖完整串接)
+  - [2.6 安全檢查表（上線前逐項確認）](點名伺服器%20API.md#26-安全檢查表上線前逐項確認)
 
 
 ## 1. 後端 API 規格
@@ -75,13 +75,13 @@ POST /api/session/start
 
 > ⚠️ **`session_id` 必須是不可預測的隨機值**（例如 UUID v4 或 128-bit 隨機 hex），
 > **不可用 `sess_20260909_01` 這種「日期 + 流水號」格式**。
-> 理由：`session_id` 是 [2.2](#22-app取得本次點名所有學生座標app--node) 的存取憑證之一，
+> 理由：`session_id` 是 [2.2](點名伺服器%20API.md#22-app取得本次點名所有學生座標app--node) 的存取憑證之一，
 > 可預測就等於把全班座標的門打開（IDOR 漏洞）。
 
-**⚠️ 這個接口成功後，Node 必須再接兩件事**（詳見 [2.0 資料流與設計原則](#20-資料流與設計原則)）：
+**⚠️ 這個接口成功後，Node 必須再接兩件事**（詳見 [2.0 資料流與設計原則](點名伺服器%20API.md#20-資料流與設計原則)）：
 
-1. 呼叫 [1.2 取得 OTP 對照表](#12-老師取得-otp-驗證對照表) 拿到 `otp_list`。
-2. 把 `session_id` + `xor_key` + `otp_list` 用 HTTP `POST /api/session/config` **送給定位計算程式**（規格見 [[2.2.1 定位計算程式 — 跨程式介面規格]] §A），同時**清空上次的座標暫存 buffer**（見 [2.3](#23-座標暫存buffer資料結構)）。
+1. 呼叫 [1.2 取得 OTP 對照表](點名伺服器%20API.md#12-老師取得-otp-驗證對照表) 拿到 `otp_list`。
+2. 把 `session_id` + `xor_key` + `otp_list` 用 HTTP `POST /api/session/config` **送給定位計算程式**（規格見 [[2.2.1 點名伺服器 API old]] §A），同時**清空上次的座標暫存 buffer**（見 [2.3](點名伺服器%20API.md#23-座標暫存buffer資料結構)）。
 
 > 定位計算程式收到後才會把 `xor_key` 以 MQTT 發布給感測器，並開始產生座標。
 > **Node 本身不碰 MQTT**，所有與感測器、定位引擎的通訊都由定位計算程式負責。
@@ -309,7 +309,7 @@ App ──POST /api/coords/get（帶 session_id）────▶ Node
 **目的：** 定位計算程式每算好一個學生的座標，就主動推回 Node 暫存。
 此接口在一次 session 內可**連續呼叫多次（一個學生一次）**。
 
-> 本節對應 [[2.2.1 定位計算程式 — 跨程式介面規格]] 的 §B，兩份文件需保持一致。
+> 本節對應 [[2.2.1 點名伺服器 API old]] 的 §B，兩份文件需保持一致。
 
 ```
 POST /api/coords
@@ -347,7 +347,7 @@ POST /api/coords
 
 | 欄位 | 型態 | 必填 | 說明 |
 |------|------|------|------|
-| `session_id` | string | 是 | 對應 [1.1](#11-老師開始點名-session) 建立的 session；不存在視為無效 |
+| `session_id` | string | 是 | 對應 [1.1](點名伺服器%20API.md#11-老師開始點名-session) 建立的 session；不存在視為無效 |
 | `student_id` | string | 是 | 8 位學號，**buffer 的 key** |
 | `x` | int / float | 是 | 座標 X |
 | `y` | int / float | 是 | 座標 Y |
@@ -355,7 +355,7 @@ POST /api/coords
 | `timestamp` | string | 是 | `dd/mm/yyyy HH:MM:SS`（NTP 同步後時間），保留原始量測時間 |
 
 > 定位計算程式**不需要**送 `otp`、`mac`、`rssi`。
-> 只有「已通過 OTP 驗證」的學生才會被定位（嚴格模式，見 [[2.2.1 定位計算程式 — 跨程式介面規格]] §C），
+> 只有「已通過 OTP 驗證」的學生才會被定位（嚴格模式，見 [[2.2.1 點名伺服器 API old]] §C），
 > 因此能到達這支 API 的 `student_id` 本身就已經是被信任的。
 
 **Node 收到後做的事（依序）：**
@@ -363,7 +363,7 @@ POST /api/coords
 1. 驗證欄位是否齊全、型態是否正確。
 2. 檢查 `session_id` 是否為**目前進行中的 session**。
 3. 依 `coordinate_system` 檢查座標範圍（`grid32`：`0 ≤ x, y ≤ 31`；`meter`：教室允許範圍內）。
-4. 以上皆通過 → 以 `(session_id, student_id)` 為 key **寫入／覆蓋** buffer（見 [2.3](#23-座標暫存buffer資料結構)），回 `200 OK`。
+4. 以上皆通過 → 以 `(session_id, student_id)` 為 key **寫入／覆蓋** buffer（見 [2.3](點名伺服器%20API.md#23-座標暫存buffer資料結構)），回 `200 OK`。
 5. 任一項不通過 → **丟棄該筆、不寫入 buffer**，回 `400 Bad Request`。
 
 **Response Body（200 OK）：**
@@ -392,7 +392,7 @@ POST /api/coords
 }
 ```
 
-> ⚠️ 座標**只寫入、不即時通知 App**。App 何時拿得到，取決於它自己來打 [2.2](#22-app取得本次點名所有學生座標app--node)。
+> ⚠️ 座標**只寫入、不即時通知 App**。App 何時拿得到，取決於它自己來打 [2.2](點名伺服器%20API.md#22-app取得本次點名所有學生座標app--node)。
 
 
 ---
@@ -534,7 +534,7 @@ POST /api/coords/get
 
 > 📌 **課堂以外的強化選項（若之後有需要）**
 > 每次請求都帶明碼密碼不是長久之計，建議改為：
-> 1. App 用 [1.4 登入](#14-登入) 換一張 **token**，之後所有 API 改帶 `Authorization: Bearer <token>`。
+> 1. App 用 [1.4 登入](點名伺服器%20API.md#14-登入) 換一張 **token**，之後所有 API 改帶 `Authorization: Bearer <token>`。
 > 2. `session_id` 維持隨機不可預測 + 綁定老師身分（兩層防護）。
 > 3. 限制同一帳號的請求頻率（rate limit），避免被暴力嘗試密碼或大量爬取座標。
 >
@@ -543,7 +543,7 @@ POST /api/coords/get
 
 ---
 
-		### 2.3 座標暫存（Buffer）資料結構
+### 2.3 座標暫存（Buffer）資料結構
 
 **位置：** Node 主程式記憶體（in-memory），**不落地資料庫**。
 理由：座標是「一次點名期間」的即時資料，點名結束即失去意義。
@@ -568,7 +568,7 @@ const coordBuffer = {
 
 | 層級 | Key | Value | 說明 |
 |------|-----|-------|------|
-| 第一層 | `session_id` | 該次點名的 buffer | 每次 [1.1 開始點名](#11-老師開始點名-session) 時**先清空**再建立 |
+| 第一層 | `session_id` | 該次點名的 buffer | 每次 [1.1 開始點名](點名伺服器%20API.md#11-老師開始點名-session) 時**先清空**再建立 |
 | 第二層 | `student_id` | 最新座標物件 | **覆蓋語意**：同一學生再上傳就取代舊的，不累積歷史 |
 | 座標物件 | — | `{ x, y, timestamp }` | `x`/`y` 為該生最新位置，`timestamp` 為量測時間 |
 
@@ -580,7 +580,7 @@ const coordBuffer = {
 | 收到 2.1 座標，該生尚未有紀錄 | 直接寫入 |
 | 收到 2.1 座標，該生已有紀錄 | **覆蓋**舊座標（只保留最新） |
 | 同一 session 換了 `coordinate_system` | 以最新一筆為準，2.2 回應的 `coordinate_system` 隨之更新 |
-| session 結束／老師按下結束 | 呼叫 [2.4](#24-老師清除本次定位資料) 清掉該 session 的 buffer |
+| session 結束／老師按下結束 | 呼叫 [2.4](點名伺服器%20API.md#24-老師清除本次定位資料) 清掉該 session 的 buffer |
 | Node 重啟 | buffer 清空（in-memory 特性）；點名需重新走 1.1 開始 |
 
 > ⚠️ **`coordBuffer` 不會自動長大也不會自動縮小**，
@@ -593,7 +593,7 @@ const coordBuffer = {
 
 **目的：** 一次點名結束時，把該 session 暫存的座標全部丟掉，避免殘留或外洩。
 
-> 🔒 **同 [2.2](#22-app取得本次點名所有學生座標app--node)，本接口也必須驗證老師身分。**
+> 🔒 **同 [2.2](點名伺服器%20API.md#22-app取得本次點名所有學生座標app--node)，本接口也必須驗證老師身分。**
 > 否則任何人只要知道 `session_id` 就能**清掉老師正在進行中的點名資料**（阻斷服務）。
 
 ```
@@ -663,32 +663,72 @@ POST /api/coords/clear
 
 ### 2.5 定位 API 時序圖（完整串接）
 
-```
-老師 App ──POST /api/session/start（email+password）───▶ Node （1.1，取得 xor_key + session_id）
-老師 App ──POST /api/session/otp-list（email+password）▶ Node （1.2，取得 otp_list）
-                                        Node ──清空 coordBuffer[session_id]──┐
-                                        Node ──POST /api/session/config────▶ 定位計算（2.2.1 §A）
-                                                                            定位計算 ──MQTT publish session_key──▶ 感測器
-                                                                            感測器   ──MQTT receivers/{NO}──▶ 定位計算
-                                                                            定位計算 ──HTTP A response(ok)──▶ Node
-定位計算 ──POST /api/coords（學生A）───▶ Node ──覆蓋 buffer──┐   ← 限 127.0.0.1
-定位計算 ──POST /api/coords（學生B）───▶ Node ──覆蓋 buffer──┤  ← 2.1，陸續進來
-定位計算 ──POST /api/coords（學生A 更新）▶ Node ──覆蓋 buffer┘
-App      ──POST /api/coords/get（email+password+session_id）▶ Node ──回 coords 全表──▶ App （2.2）
-老師 App ──POST /api/coords/clear（email+password+session_id）▶ Node ──清空 buffer      （2.4）
+```mermaid
+sequenceDiagram
+    autonumber
+    participant T as 📱 老師 App
+    participant N as 🗄️ 點名伺服器 (Node.js)
+    participant L as 🧮 定位計算程式 (Python)
+    participant SEN as 📡 感測器（樹莓派）
+
+    rect rgb(255, 250, 230)
+    Note over T,N: 【前置整備】老師端連續兩支 API（見 2.3.1 圖 1）
+    T->>N: POST /api/session/start<br>{email, password}
+    activate N
+    N->>N: 驗證帳密 → 產生 session_id + xor_key
+    N-->>T: 200 {xor_key, session_id}
+    deactivate N
+    T->>N: POST /api/session/otp-list<br>{email, password}
+    activate N
+    N-->>T: 200 {otp_list}
+    deactivate N
+    Note over T,N: 1.1 取得 xor_key + session_id；1.2 取得 otp_list（最敏感接口）
+    end
+    rect rgb(230, 244, 255)
+    Note over N,L: 【定位伺服器 §2.1】開始定位：Node → 定位計算（HTTP，同機 127.0.0.1:8020）
+    N->>N: 清空 coordBuffer[session_id]
+    N->>L: POST /api/session/config<br>{session_id, xor_key, otp_list, timeout}
+    activate L
+    L->>SEN: MQTT publish {topic}/session_key<br>{session_id, xor_key}（QoS 1 / retained）
+    Note over L,SEN: 定位伺服器 §1.1：輸出，感測器訂閱解密（新開機也拿得到 retained）
+    SEN->>L: MQTT publish {topic}/receivers/{RECEIVER_NO}<br>{student_id, OTP, mac, rssi, scanner_id, time}
+    Note over L: 定位伺服器 §1.2：輸入。嚴格模式判定有效封包：<br>student_id ∈ otp_list 且 OTP 相符<br>（不符者整筆丟棄，不進定位引擎）
+    alt 第一個有效封包 OTP 相符
+        L-->>N: 200 {status: ok, session_id, student_id}
+    else OTP 不符
+        L-->>N: 400 {status: failed, reason: otp_mismatch}
+    else 等不到有效封包（逾時，預設 5 秒）
+        L-->>N: 504 {status: failed, reason: timeout}
+    end
+    Note over N,L: §2.1 同步阻塞、一問一答，只回一次即結束；這條通道只驗證「管道是否打通」
+    deactivate L
+    end
+
+    rect rgb(230, 255, 235)
+    Note over L,N: 【本文件 2.1（＝定位伺服器 §2.2）】算好座標主動回推（一位學生一支，可多次，陸續進來）
+    L->>N: POST /api/coords<br>{session_id, student_id, x, y, coordinate_system, timestamp}
+    activate N
+    N->>N: 檢查欄位／型態、session_id 進行中、<br>grid32 需 0 ≤ x,y ≤ 31 → 覆蓋 buffer
+    N-->>L: 200 {status: ok, accepted: true}
+    deactivate N
+    Note over L,N: 學生 A、學生 B…持續交錯，Node 的 buffer 是定位計算與 App 之間的橋樑
+    Note over L,N: ⚠️ 2.1 /api/coords 只綁 127.0.0.1:3000、不掛對外（防偽造座標）；失敗回 400 invalid_coord
+    end
+
+    rect rgb(245, 245, 245)
+    Note over T,N: 【2.2 / 2.4】App 拉取座標與點名結束
+    T->>N: POST /api/coords/get<br>{email, password, session_id}
+    activate N
+    N-->>T: 200 {coords 全表}
+    deactivate N
+    T->>N: POST /api/coords/clear<br>{email, password, session_id}
+    activate N
+    N->>N: 清空 buffer（資料最小化）
+    N-->>T: 200 {status: ok, cleared: n}
+    deactivate N
+    end
 ```
 
-| 步驟 | API | 方向 | 驗身分 | 備註 |
-|------|-----|------|:---:|------|
-| 1 | [1.1 `/api/session/start`](#11-老師開始點名-session) | 老師 App → Node | ✅ | 拿 `xor_key` + `session_id` |
-| 2 | [1.2 `/api/session/otp-list`](#12-老師取得-otp-驗證對照表) | 老師 App → Node | ✅ | 拿 `otp_list`（敏感） |
-| 3 | `POST /api/session/config` | Node → 定位計算 | — | 規格見 [[2.2.1 定位計算程式 — 跨程式介面規格]] §A |
-| 4 | [2.1 `/api/coords`](#21-定位計算程式上傳座標定位計算--node) | 定位計算 → Node | ❌（限內網） | 一位學生一支，可多次 |
-| 5 | [2.2 `/api/coords/get`](#22-app取得本次點名所有學生座標app--node) | App → Node | ✅ | App 想要位置時就打一次 |
-| 6 | [2.4 `/api/coords/clear`](#24-老師清除本次定位資料) | 老師 App → Node | ✅ | 點名結束清除 |
-
-> 步驟 4 與 5 沒有固定先後，是**持續交錯**發生的：
-> 定位計算一直推、App 一直拉，Node 的 buffer 就是兩者之間的橋樑。
 
 ---
 
@@ -708,7 +748,7 @@ App      ──POST /api/coords/get（email+password+session_id）▶ Node ─�
 | 10 | 建議後續改為 token 機制（Bearer） | 避免每次請求都傳明碼密碼 |
 
 > 💡 **第 10 點是最終方向**：目前「每次請求帶帳密」是把洞補起來的**過渡方案**，
-> 正式做法是 [1.4 登入](#14-登入) 後發一張有時效的 token，
+> 正式做法是 [1.4 登入](點名伺服器%20API.md#14-登入) 後發一張有時效的 token，
 > 之後所有需要身分的接口改帶 `Authorization: Bearer <token>`。
 
 **與其他文件的關係：**
@@ -717,5 +757,5 @@ App      ──POST /api/coords/get（email+password+session_id）▶ Node ─�
 |------|----------|
 | 本文件 §1 | App ↔ Node 的點名流程（session / OTP / 登入註冊） |
 | 本文件 §2 | 座標在 Node 的**收（2.1）／存（2.3）／發（2.2）／清（2.4）** |
-| [[2.2.1 定位計算程式 — 跨程式介面規格]] §A / §B | Node ↔ 定位計算的兩支 HTTP（config / coords） |
-| [[2.2.1 定位計算程式 — 跨程式介面規格]] §C / §D | 感測器 ↔ 定位計算的 MQTT |
+| [[2.2.1 點名伺服器 API old]] §A / §B | Node ↔ 定位計算的兩支 HTTP（config / coords） |
+| [[2.2.1 點名伺服器 API old]] §C / §D | 感測器 ↔ 定位計算的 MQTT |
